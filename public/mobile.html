@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=0">
+    <title>Mobile Scanner | Firebase</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
+</head>
+<body>
+    <div id="status" class="status-badge status-offline">Initializing...</div>
+
+    <div class="container">
+        <h1>Mobile Scanner</h1>
+        <p>Scan QR or capture an image</p>
+
+        <div class="card" style="padding: 1rem;">
+            <div class="scanner-container">
+                <video id="video" playsinline></video>
+                <canvas id="canvas" style="display:none;"></canvas>
+                <div class="scan-overlay">
+                    <div class="scan-line"></div>
+                </div>
+            </div>
+
+            <div style="margin-top: 1.5rem; display: flex; gap: 10px; justify-content: center;">
+                <button id="capture-btn" class="btn">Take & Upload Picture</button>
+            </div>
+        </div>
+
+        <div id="output" class="result-list"></div>
+    </div>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+        import { getFirestore, collection, addDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+        import { getStorage, ref, uploadString, getDownloadURL } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-storage.js";
+
+        // Firebase Config
+        const firebaseConfig = {
+            apiKey: 'AIzaSyCZ9eeuvzHnYug4_jFNrLhNeIHgm0-IMV8',
+            appId: '1:962852176578:web:edfde764e83ec31860f15b',
+            messagingSenderId: '962852176578',
+            projectId: 'scanner-ad9f0',
+            authDomain: 'scanner-ad9f0.firebaseapp.com',
+            storageBucket: 'scanner-ad9f0.firebasestorage.app',
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+        const storage = getStorage(app);
+
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('canvas');
+        const canvasCtx = canvas.getContext('2d', { willReadFrequently: true });
+        const output = document.getElementById('output');
+        const captureBtn = document.getElementById('capture-btn');
+        const statusEl = document.getElementById('status');
+
+        let scanning = true;
+
+        statusEl.textContent = 'Ready';
+        statusEl.className = 'status-badge status-online';
+
+        // Request camera
+        navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } })
+            .then((stream) => {
+                video.srcObject = stream;
+                video.play();
+                requestAnimationFrame(tick);
+            })
+            .catch(err => {
+                log("Camera error: " + err.message, true);
+            });
+
+        function log(msg, error = false) {
+            const item = document.createElement('div');
+            item.className = 'result-item';
+            if (error) item.style.color = '#ef4444';
+            item.textContent = msg;
+            output.prepend(item);
+        }
+
+        async function tick() {
+            if (video.readyState === video.HAVE_ENOUGH_DATA && scanning) {
+                canvas.height = video.videoHeight;
+                canvas.width = video.videoWidth;
+                canvasCtx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                const imageData = canvasCtx.getImageData(0, 0, canvas.width, canvas.height);
+                const code = jsQR(imageData.data, imageData.width, imageData.height, { inversionAttempts: "dontInvert" });
+
+                if (code) {
+                    scanning = false;
+                    log("QR detected: " + code.data);
+                    
+                    try {
+                        await addDoc(collection(db, "scans"), {
+                            type: "qr",
+                            data: code.data,
+                            timestamp: serverTimestamp()
+                        });
+                        log("Synchronized to Firebase!");
+                        if (navigator.vibrate) navigator.vibrate(200);
+                    } catch (e) {
+                        log("Sync error: " + e.message, true);
+                    }
+
+                    setTimeout(() => { scanning = true; }, 3000);
+                }
+            }
+            requestAnimationFrame(tick);
+        }
+
+        captureBtn.addEventListener('click', async () => {
+            captureBtn.disabled = true;
+            captureBtn.textContent = "Uploading...";
+            
+            canvas.height = video.videoHeight;
+            canvas.width = video.videoWidth;
+            canvasCtx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            const imageDataUrl = canvas.toDataURL('image/jpeg', 0.6);
+
+            try {
+                const filename = `scans/${Date.now()}.jpg`;
+                const storageRef = ref(storage, filename);
+                
+                log("Uploading image...");
+                await uploadString(storageRef, imageDataUrl, 'data_url');
+                const downloadURL = await getDownloadURL(storageRef);
+
+                await addDoc(collection(db, "scans"), {
+                    type: "image",
+                    url: downloadURL,
+                    timestamp: serverTimestamp()
+                });
+
+                log("Image sent to Windows!");
+                if (navigator.vibrate) navigator.vibrate(100);
+            } catch (e) {
+                log("Upload error: " + e.message, true);
+            } finally {
+                captureBtn.disabled = false;
+                captureBtn.textContent = "Take & Upload Picture";
+            }
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Windows Receiver | Firebase</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div id="status" class="status-badge status-offline">Initializing...</div>
+
+    <div class="container">
+        <h1>Windows Receiver</h1>
+        <p>Listening for real-time updates from FirebaseFirestore...</p>
+
+        <div class="card">
+            <div id="image-container" style="display: none;">
+                <h3 style="margin-bottom: 1rem;">Latest Scanned Image</h3>
+                <img id="image-display" src="" alt="Scanned content">
+            </div>
+
+            <div class="result-list" id="qr-list">
+                <h3>Latest Scans</h3>
+                <!-- Results will appear here -->
+            </div>
+        </div>
+    </div>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+        import { getFirestore, collection, query, orderBy, limit, onSnapshot } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+
+        const firebaseConfig = {
+            apiKey: 'AIzaSyCZ9eeuvzHnYug4_jFNrLhNeIHgm0-IMV8',
+            appId: '1:962852176578:web:edfde764e83ec31860f15b',
+            messagingSenderId: '962852176578',
+            projectId: 'scanner-ad9f0',
+            authDomain: 'scanner-ad9f0.firebaseapp.com',
+            storageBucket: 'scanner-ad9f0.firebasestorage.app',
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+
+        const statusEl = document.getElementById('status');
+        const qrList = document.getElementById('qr-list');
+        const imageContainer = document.getElementById('image-container');
+        const imageDisplay = document.getElementById('image-display');
+
+        statusEl.textContent = 'Listening';
+        statusEl.className = 'status-badge status-online';
+
+        // Listen for new scans
+        const q = query(collection(db, "scans"), orderBy("timestamp", "desc"), limit(10));
+        
+        onSnapshot(q, (snapshot) => {
+            snapshot.docChanges().forEach((change) => {
+                if (change.type === "added") {
+                    const data = change.doc.data();
+                    
+                    if (data.type === "qr") {
+                        const item = document.createElement('div');
+                        item.className = 'result-item';
+                        try {
+                            new URL(data.data);
+                            item.innerHTML = `<a href="${data.data}" target="_blank" style="color: var(--primary); text-decoration: none;">${data.data}</a>`;
+                        } catch (_) {
+                            item.textContent = data.data;
+                        }
+                        qrList.prepend(item);
+                    } else if (data.type === "image") {
+                        imageContainer.style.display = 'block';
+                        imageDisplay.src = data.url;
+                        
+                        const item = document.createElement('div');
+                        item.className = 'result-item';
+                        item.textContent = "New Image Received";
+                        qrList.prepend(item);
+                    }
+                }
+            });
+        });
+    </script>
+</body>
+</html>
