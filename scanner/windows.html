@@ -3,20 +3,27 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Windows Receiver | Firebase</title>
+    <title>Windows Receiver | Firebase RTDB</title>
     <link rel="stylesheet" href="style.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 </head>
 <body>
     <div id="status" class="status-badge status-offline">Initializing...</div>
 
     <div class="container">
         <h1>Windows Receiver</h1>
-        <p>Listening for real-time updates from FirebaseFirestore...</p>
+        <p>Scan the code below with your mobile to start</p>
+
+        <div class="card" style="margin-bottom: 2rem;">
+            <h3>Pair Your Mobile</h3>
+            <div id="qrcode" style="display: flex; justify-content: center; padding: 1.5rem; background: #fff; border-radius: 16px; margin: 1rem auto; width: fit-content;"></div>
+            <p id="session-info" style="font-size: 0.8rem; color: var(--text-muted);"></p>
+        </div>
 
         <div class="card">
             <div id="image-container" style="display: none;">
                 <h3 style="margin-bottom: 1rem;">Latest Scanned Image</h3>
-                <img id="image-display" src="" alt="Scanned content">
+                <img id="image-display" src="" alt="Scanned content" style="max-width: 100%; border-radius: 12px; border: 2px solid var(--primary);">
             </div>
 
             <div class="result-list" id="qr-list">
@@ -28,7 +35,7 @@
 
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
-        import { getFirestore, collection, query, orderBy, limit, onSnapshot } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+        import { getDatabase, ref, onChildAdded } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js";
 
         const firebaseConfig = {
             apiKey: 'AIzaSyCZ9eeuvzHnYug4_jFNrLhNeIHgm0-IMV8',
@@ -36,49 +43,62 @@
             messagingSenderId: '962852176578',
             projectId: 'scanner-ad9f0',
             authDomain: 'scanner-ad9f0.firebaseapp.com',
-            storageBucket: 'scanner-ad9f0.firebasestorage.app',
+            databaseURL: 'https://scanner-ad9f0-default-rtdb.firebaseio.com',
         };
 
         const app = initializeApp(firebaseConfig);
-        const db = getFirestore(app);
+        const db = getDatabase(app);
 
         const statusEl = document.getElementById('status');
         const qrList = document.getElementById('qr-list');
         const imageContainer = document.getElementById('image-container');
         const imageDisplay = document.getElementById('image-display');
+        const sessionInfo = document.getElementById('session-info');
 
-        statusEl.textContent = 'Listening';
+        // Generate unique Session ID
+        const sessionId = 'ser_' + Math.random().toString(36).substr(2, 9);
+        const mobileUrl = `${window.location.origin}/mobile.html?session=${sessionId}`;
+        
+        sessionInfo.textContent = `Session ID: ${sessionId}`;
+
+        // Create QR Code
+        new QRCode(document.getElementById("qrcode"), {
+            text: mobileUrl,
+            width: 200,
+            height: 200,
+            colorDark : "#0f172a",
+            colorLight : "#ffffff",
+            correctLevel : QRCode.CorrectLevel.H
+        });
+
+        statusEl.textContent = 'Listening (RTDB)';
         statusEl.className = 'status-badge status-online';
 
-        // Listen for new scans
-        const q = query(collection(db, "scans"), orderBy("timestamp", "desc"), limit(10));
+        // Listen for new scans in this session
+        const sessionRef = ref(db, `sessions/${sessionId}`);
         
-        onSnapshot(q, (snapshot) => {
-            snapshot.docChanges().forEach((change) => {
-                if (change.type === "added") {
-                    const data = change.doc.data();
-                    
-                    if (data.type === "qr") {
-                        const item = document.createElement('div');
-                        item.className = 'result-item';
-                        try {
-                            new URL(data.data);
-                            item.innerHTML = `<a href="${data.data}" target="_blank" style="color: var(--primary); text-decoration: none;">${data.data}</a>`;
-                        } catch (_) {
-                            item.textContent = data.data;
-                        }
-                        qrList.prepend(item);
-                    } else if (data.type === "image") {
-                        imageContainer.style.display = 'block';
-                        imageDisplay.src = data.url;
-                        
-                        const item = document.createElement('div');
-                        item.className = 'result-item';
-                        item.textContent = "New Image Received";
-                        qrList.prepend(item);
-                    }
+        onChildAdded(sessionRef, (snapshot) => {
+            const data = snapshot.val();
+            
+            if (data.type === "qr") {
+                const item = document.createElement('div');
+                item.className = 'result-item';
+                try {
+                    new URL(data.data);
+                    item.innerHTML = `<a href="${data.data}" target="_blank" style="color: var(--primary); text-decoration: none;">${data.data}</a>`;
+                } catch (_) {
+                    item.textContent = data.data;
                 }
-            });
+                qrList.prepend(item);
+            } else if (data.type === "image") {
+                imageContainer.style.display = 'block';
+                imageDisplay.src = data.url;
+                
+                const item = document.createElement('div');
+                item.className = 'result-item';
+                item.textContent = "New Image Received";
+                qrList.prepend(item);
+            }
         });
     </script>
 </body>

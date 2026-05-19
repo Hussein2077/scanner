@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=0">
-    <title>Mobile Scanner | Firebase</title>
+    <title>Mobile Scanner | Firebase RTDB</title>
     <link rel="stylesheet" href="style.css">
     <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
 </head>
@@ -12,7 +12,7 @@
 
     <div class="container">
         <h1>Mobile Scanner</h1>
-        <p>Scan QR or capture an image</p>
+        <p id="session-tag">Connecting to session...</p>
 
         <div class="card" style="padding: 1rem;">
             <div class="scanner-container">
@@ -23,8 +23,8 @@
                 </div>
             </div>
 
-            <div style="margin-top: 1.5rem; display: flex; gap: 10px; justify-content: center;">
-                <button id="capture-btn" class="btn">Take & Upload Picture</button>
+            <div style="margin-top: 1.5rem; display: flex; flex-direction: column; gap: 10px; justify-content: center;">
+                <button id="capture-btn" class="btn">Take & Send Picture</button>
             </div>
         </div>
 
@@ -33,7 +33,7 @@
 
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
-        import { getFirestore, collection, addDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+        import { getDatabase, ref, push, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js";
 
         // Firebase Config
         const firebaseConfig = {
@@ -42,11 +42,11 @@
             messagingSenderId: '962852176578',
             projectId: 'scanner-ad9f0',
             authDomain: 'scanner-ad9f0.firebaseapp.com',
-            storageBucket: 'scanner-ad9f0.firebasestorage.app',
+            databaseURL: 'https://scanner-ad9f0-default-rtdb.firebaseio.com',
         };
 
         const app = initializeApp(firebaseConfig);
-        const db = getFirestore(app);
+        const db = getDatabase(app);
 
         const video = document.getElementById('video');
         const canvas = document.getElementById('canvas');
@@ -54,11 +54,24 @@
         const output = document.getElementById('output');
         const captureBtn = document.getElementById('capture-btn');
         const statusEl = document.getElementById('status');
+        const sessionTag = document.getElementById('session-tag');
+
+        // Get Session ID from URL
+        const urlParams = new URLSearchParams(window.location.search);
+        const sessionId = urlParams.get('session');
+
+        if (!sessionId) {
+            statusEl.textContent = 'Error';
+            statusEl.className = 'status-badge status-offline';
+            sessionTag.textContent = 'No Session ID found. Please scan the QR code on the Windows screen.';
+            sessionTag.style.color = '#ef4444';
+        } else {
+            sessionTag.textContent = `Connected to Session: ${sessionId}`;
+            statusEl.textContent = 'Active';
+            statusEl.className = 'status-badge status-online';
+        }
 
         let scanning = true;
-
-        statusEl.textContent = 'Ready';
-        statusEl.className = 'status-badge status-online';
 
         // Request camera
         navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } })
@@ -80,7 +93,7 @@
         }
 
         async function tick() {
-            if (video.readyState === video.HAVE_ENOUGH_DATA && scanning) {
+            if (video.readyState === video.HAVE_ENOUGH_DATA && scanning && sessionId) {
                 canvas.height = video.videoHeight;
                 canvas.width = video.videoWidth;
                 canvasCtx.drawImage(video, 0, 0, canvas.width, canvas.height);
@@ -92,12 +105,12 @@
                     log("QR detected: " + code.data);
                     
                     try {
-                        await addDoc(collection(db, "scans"), {
+                        await push(ref(db, `sessions/${sessionId}`), {
                             type: "qr",
                             data: code.data,
                             timestamp: serverTimestamp()
                         });
-                        log("Synchronized to Firebase!");
+                        log("Sent to Windows!");
                         if (navigator.vibrate) navigator.vibrate(200);
                     } catch (e) {
                         log("Sync error: " + e.message, true);
@@ -110,31 +123,36 @@
         }
 
         captureBtn.addEventListener('click', async () => {
-            captureBtn.disabled = true;
-            captureBtn.textContent = "Uploading...";
+            if (!sessionId) return;
             
-            // Generate a lower quality image to fit in Firestore (max 1MB)
-            canvas.height = Math.floor(video.videoHeight / 2); // shrink height
-            canvas.width = Math.floor(video.videoWidth / 2);   // shrink width
+            captureBtn.disabled = true;
+            captureBtn.textContent = "Sending...";
+            
+            // Resize and compress for socket-like speed
+            const maxWidth = 800;
+            const scale = Math.min(1, maxWidth / video.videoWidth);
+            canvas.width = video.videoWidth * scale;
+            canvas.height = video.videoHeight * scale;
+            
             canvasCtx.drawImage(video, 0, 0, canvas.width, canvas.height);
-            const imageDataUrl = canvas.toDataURL('image/jpeg', 0.5); // use 0.5 compression
+            const imageDataUrl = canvas.toDataURL('image/jpeg', 0.5);
 
             try {
-                log("Uploading image...");
+                log("Optimizing & Sending...");
                 
-                await addDoc(collection(db, "scans"), {
+                await push(ref(db, `sessions/${sessionId}`), {
                     type: "image",
-                    url: imageDataUrl, // Store Base64 directly
+                    url: imageDataUrl,
                     timestamp: serverTimestamp()
                 });
 
-                log("Image sent to Windows!");
+                log("Image sent!");
                 if (navigator.vibrate) navigator.vibrate(100);
             } catch (e) {
-                log("Upload error: " + e.message, true);
+                log("Error: " + e.message, true);
             } finally {
                 captureBtn.disabled = false;
-                captureBtn.textContent = "Take & Upload Picture";
+                captureBtn.textContent = "Take & Send Picture";
             }
         });
     </script>
